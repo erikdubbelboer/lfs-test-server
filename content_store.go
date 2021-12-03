@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -28,24 +29,46 @@ func NewContentStore(base string) (*ContentStore, error) {
 	return &ContentStore{base}, nil
 }
 
+type bothCloser struct {
+	f *os.File
+	g *gzip.Reader
+}
+
+func (b *bothCloser) Read(p []byte) (int, error) {
+	return b.g.Read(p)
+}
+
+func (b *bothCloser) Close() error {
+	err := b.g.Close()
+	if err := b.f.Close(); err != nil {
+		return err
+	}
+	return err
+}
+
 // Get takes a Meta object and retreives the content from the store, returning
 // it as an io.ReaderCloser. If fromByte > 0, the reader starts from that byte
 func (s *ContentStore) Get(meta *MetaObject, fromByte int64) (io.ReadCloser, error) {
-	path := filepath.Join(s.basePath, transformKey(meta.Oid))
+	path := filepath.Join(s.basePath, transformKey(meta.Oid)) + ".gz"
 
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	if fromByte > 0 {
-		_, err = f.Seek(fromByte, os.SEEK_CUR)
+	g, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
 	}
-	return f, err
+	if fromByte > 0 {
+		b := make([]byte, fromByte)
+		_, err = io.ReadFull(g, b)
+	}
+	return &bothCloser{f, g}, err
 }
 
 // Put takes a Meta object and an io.Reader and writes the content to the store.
 func (s *ContentStore) Put(meta *MetaObject, r io.Reader) error {
-	path := filepath.Join(s.basePath, transformKey(meta.Oid))
+	path := filepath.Join(s.basePath, transformKey(meta.Oid)) + ".gz"
 	tmpPath := path + ".tmp"
 
 	dir := filepath.Dir(path)
@@ -59,11 +82,17 @@ func (s *ContentStore) Put(meta *MetaObject, r io.Reader) error {
 	}
 	defer os.Remove(tmpPath)
 
+	g, _ := gzip.NewWriterLevel(file, gzip.BestCompression)
+
 	hash := sha256.New()
-	hw := io.MultiWriter(hash, file)
+	hw := io.MultiWriter(hash, g)
 
 	written, err := io.Copy(hw, r)
 	if err != nil {
+		file.Close()
+		return err
+	}
+	if err := g.Close(); err != nil {
 		file.Close()
 		return err
 	}
