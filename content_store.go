@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -57,11 +58,14 @@ func (s *ContentStore) Get(meta *MetaObject, fromByte int64) (io.ReadCloser, err
 	}
 	g, err := gzip.NewReader(f)
 	if err != nil {
+		fmt.Printf("file not gzip %s %v\n", path, err)
 		return nil, err
 	}
 	if fromByte > 0 {
-		b := make([]byte, fromByte)
-		_, err = io.ReadFull(g, b)
+		_, err = io.CopyN(io.Discard, g, fromByte)
+		if err != nil {
+			fmt.Printf("not enough bytes %s %v\n", path, err)
+		}
 	}
 	return &bothCloser{f, g}, err
 }
@@ -89,10 +93,12 @@ func (s *ContentStore) Put(meta *MetaObject, r io.Reader) error {
 
 	written, err := io.Copy(hw, r)
 	if err != nil {
+		fmt.Printf("failed to write %s %v\n", path, err)
 		file.Close()
 		return err
 	}
 	if err := g.Close(); err != nil {
+		fmt.Printf("failed to close %s %v\n", path, err)
 		file.Close()
 		return err
 	}
