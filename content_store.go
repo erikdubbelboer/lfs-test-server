@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 )
@@ -52,8 +53,11 @@ func (b *bothCloser) Close() error {
 func (s *ContentStore) Get(meta *MetaObject, fromByte int64) (io.ReadCloser, error) {
 	path := filepath.Join(s.basePath, transformKey(meta.Oid)) + ".gz"
 
+	fmt.Printf("Get %q\n", path)
+
 	f, err := os.Open(path)
 	if err != nil {
+		fmt.Printf("failed to open %q %v\n", path, err)
 		return nil, err
 	}
 	g, err := gzip.NewReader(f)
@@ -62,7 +66,7 @@ func (s *ContentStore) Get(meta *MetaObject, fromByte int64) (io.ReadCloser, err
 		return nil, err
 	}
 	if fromByte > 0 {
-		_, err = io.CopyN(io.Discard, g, fromByte)
+		_, err = io.CopyN(ioutil.Discard, g, fromByte)
 		if err != nil {
 			fmt.Printf("not enough bytes %s %v\n", path, err)
 		}
@@ -121,7 +125,7 @@ func (s *ContentStore) Put(meta *MetaObject, r io.Reader) error {
 
 // Exists returns true if the object exists in the content store.
 func (s *ContentStore) Exists(meta *MetaObject) bool {
-	path := filepath.Join(s.basePath, transformKey(meta.Oid))
+	path := filepath.Join(s.basePath, transformKey(meta.Oid)) + ".gz"
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return false
 	}
